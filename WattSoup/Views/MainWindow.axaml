@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:WattSoup.ViewModels"
+        mc:Ignorable="d" d:DesignWidth="440" d:DesignHeight="560"
+        x:Class="WattSoup.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="WattSoup"
+        Icon="/Assets/icon.png"
+        Width="520" Height="680"
+        MinWidth="360" MinHeight="480"
+        Background="#0F1115">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="24">
+
+        <!-- App header -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8"
+                    VerticalAlignment="Center" Margin="0,0,0,12">
+            <TextBlock Text="WattSoup" FontSize="22" FontWeight="SemiBold" Foreground="#F5F7FA" />
+            <TextBlock Text="v1.0" FontSize="12" Foreground="#6B7280" VerticalAlignment="Bottom" Margin="0,0,0,4" />
+        </StackPanel>
+
+        <!-- One tab per battery (BAT0, BAT1, ...). Each tab renders a BatteryView via ViewLocator. -->
+        <TabControl Grid.Row="1"
+                    ItemsSource="{Binding Batteries}"
+                    IsVisible="{Binding HasBattery}">
+            <TabControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:BatteryViewModel">
+                    <TextBlock Text="{Binding Name}" />
+                </DataTemplate>
+            </TabControl.ItemTemplate>
+        </TabControl>
+
+        <!-- Empty state -->
+        <TextBlock Grid.Row="1"
+                   Text="No battery detected"
+                   IsVisible="{Binding !HasBattery}"
+                   Foreground="#F87171"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+        <!-- Footer credit -->
+        <TextBlock Grid.Row="2"
+                   Text="Created by Blake Pearn and Devin AI"
+                   FontSize="11" Foreground="#6B7280"
+                   HorizontalAlignment="Center" Margin="0,16,0,0" />
+    </Grid>
+</Window>

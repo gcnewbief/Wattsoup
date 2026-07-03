@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=WattSoup
+GenericName=Battery Health Monitor
+Comment=Monitor Linux battery health, wear, cycle count and voltage
+Exec=/usr/local/bin/wattsoup
+Icon=wattsoup
+Terminal=false
+Categories=Utility;
+Keywords=battery;power;health;monitor;charge;
+StartupNotify=true
+StartupWMClass=WattSoup
