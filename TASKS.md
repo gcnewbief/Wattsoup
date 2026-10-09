@@ -39,9 +39,15 @@
       (get user approval first; it's a new dependency).
 
 ## Data / service
-- [ ] **SVC-1** Add fixture-based tests: feed sample `uevent` text (both an Amp sample
+- [x] **SVC-1** Add fixture-based tests: feed sample `uevent` text (both an Amp sample
       and a Watt sample) into a parser and assert health/time math. Refactor the parse
       logic out of `ReadBattery` into a pure, testable method to enable this.
+      Done: extracted `BuildBatteryInfo` (pure) + `ParseUevent`, made calc/parse helpers
+      `internal`, and added an internal root-injecting ctor so fixture directories can
+      stand in for `/sys`. New `WattSoup.Tests` xUnit project (72 tests) covers
+      `LinuxBatteryService` (~93% lines), `BatteryViewModel` (100%), `BatteryInfo`.
+      Follow-ups: `MainViewModel` (Dispatcher/timer) and the Views/App bootstrap are
+      still uncovered — need an Avalonia headless test harness.
 - [ ] **SVC-2** Smooth `current_now` with a short moving average — instantaneous values
       are noisy and make "time remaining" jump around.
 - [ ] **SVC-3** Optionally read `AC/online` to explicitly detect the adapter.

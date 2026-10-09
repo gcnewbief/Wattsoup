@@ -20,18 +20,34 @@ namespace WattSoup.Services;
 /// </summary>
 public sealed class LinuxBatteryService : IBatteryService
 {
-    private const string PowerSupplyRoot = "/sys/class/power_supply";
+    private const string DefaultPowerSupplyRoot = "/sys/class/power_supply";
+
+    private readonly string _powerSupplyRoot;
+
+    public LinuxBatteryService()
+        : this(DefaultPowerSupplyRoot)
+    {
+    }
+
+    /// <summary>
+    /// Test/DI hook: point the reader at an arbitrary root so fixture directories can
+    /// stand in for the real sysfs tree.
+    /// </summary>
+    internal LinuxBatteryService(string powerSupplyRoot)
+    {
+        _powerSupplyRoot = powerSupplyRoot;
+    }
 
     public Task<IReadOnlyList<BatteryInfo>> GetBatteriesAsync(CancellationToken cancellationToken = default)
     {
         // File I/O against sysfs is cheap and synchronous; wrap in Task for the interface.
-        return Task.Run(() => ReadAllBatteries(), cancellationToken);
+        return Task.Run(() => ReadAllBatteries(_powerSupplyRoot), cancellationToken);
     }
 
-    private static IReadOnlyList<BatteryInfo> ReadAllBatteries()
+    internal static IReadOnlyList<BatteryInfo> ReadAllBatteries(string powerSupplyRoot)
     {
         var batteries = new List<BatteryInfo>();
-        foreach (var dir in FindBatteryDirectories())
+        foreach (var dir in FindBatteryDirectories(powerSupplyRoot))
         {
             var info = ReadBattery(dir);
             if (info is not null)
@@ -45,8 +61,21 @@ public sealed class LinuxBatteryService : IBatteryService
     private static BatteryInfo? ReadBattery(string batteryDir)
     {
         // uevent contains all key=value pairs in one file; fall back to individual files if absent.
-        var values = ReadUevent(batteryDir);
+        var values = ParseUevent(ReadFileSafe(Path.Combine(batteryDir, "uevent")));
+        return BuildBatteryInfo(values, Path.GetFileName(batteryDir), ReadManufactureDate(batteryDir));
+    }
 
+    /// <summary>
+    /// Pure mapping from parsed uevent key/value pairs (plus the two file-sourced inputs
+    /// that cannot live in uevent) to an immutable <see cref="BatteryInfo"/>. Performs the
+    /// unit-basis selection (Watt vs Amp) and all derived math. No file I/O, so it is
+    /// directly unit-testable with in-memory fixtures.
+    /// </summary>
+    internal static BatteryInfo BuildBatteryInfo(
+        IReadOnlyDictionary<string, string> values,
+        string fallbackName,
+        DateOnly? manufactureDate)
+    {
         string status = values.GetValueOrDefault("POWER_SUPPLY_STATUS") ?? "Unknown";
         int? capacity = ParseInt(values.GetValueOrDefault("POWER_SUPPLY_CAPACITY"));
         int? cycleCount = ParseInt(values.GetValueOrDefault("POWER_SUPPLY_CYCLE_COUNT"));
@@ -99,7 +128,7 @@ public sealed class LinuxBatteryService : IBatteryService
 
         return new BatteryInfo
         {
-            Name = values.GetValueOrDefault("POWER_SUPPLY_NAME") ?? Path.GetFileName(batteryDir),
+            Name = values.GetValueOrDefault("POWER_SUPPLY_NAME") ?? fallbackName,
             Status = status,
             Percentage = capacity,
             VoltageVolts = voltageV,
@@ -108,7 +137,7 @@ public sealed class LinuxBatteryService : IBatteryService
             ModelName = values.GetValueOrDefault("POWER_SUPPLY_MODEL_NAME"),
             Manufacturer = values.GetValueOrDefault("POWER_SUPPLY_MANUFACTURER"),
             SerialNumber = NullIfBlank(values.GetValueOrDefault("POWER_SUPPLY_SERIAL_NUMBER")),
-            ManufactureDate = ReadManufactureDate(batteryDir),
+            ManufactureDate = manufactureDate,
             FullChargeCapacity = fullChargeCapacity,
             DesignCapacity = designCapacity,
             CapacityUnit = capacityUnit,
@@ -152,12 +181,12 @@ public sealed class LinuxBatteryService : IBatteryService
     /// "type" file reads "Battery". Never assumes a specific name like BAT0, and
     /// supports machines with multiple batteries (BAT0, BAT1, ...).
     /// </summary>
-    private static IEnumerable<string> FindBatteryDirectories()
+    private static IEnumerable<string> FindBatteryDirectories(string powerSupplyRoot)
     {
-        if (!Directory.Exists(PowerSupplyRoot))
+        if (!Directory.Exists(powerSupplyRoot))
             yield break;
 
-        foreach (var dir in Directory.EnumerateDirectories(PowerSupplyRoot))
+        foreach (var dir in Directory.EnumerateDirectories(powerSupplyRoot))
         {
             var type = ReadFileSafe(Path.Combine(dir, "type"));
             if (string.Equals(type?.Trim(), "Battery", StringComparison.OrdinalIgnoreCase))
@@ -165,12 +194,15 @@ public sealed class LinuxBatteryService : IBatteryService
         }
     }
 
-    private static Dictionary<string, string> ReadUevent(string batteryDir)
+    /// <summary>
+    /// Parses raw uevent text (one KEY=value per line) into a dictionary. Blank lines and
+    /// lines without a '=' are skipped; keys and values are trimmed. A null/empty input
+    /// yields an empty dictionary.
+    /// </summary>
+    internal static Dictionary<string, string> ParseUevent(string? content)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        var ueventPath = Path.Combine(batteryDir, "uevent");
-        var content = ReadFileSafe(ueventPath);
-        if (content is null)
+        if (string.IsNullOrEmpty(content))
             return result;
 
         foreach (var line in content.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -186,7 +218,7 @@ public sealed class LinuxBatteryService : IBatteryService
 
     // --- Calculation helpers -------------------------------------------------
 
-    private static double? CalcHealth(long? fullNow, long? fullDesign)
+    internal static double? CalcHealth(long? fullNow, long? fullDesign)
     {
         if (fullNow is > 0 && fullDesign is > 0)
             return Math.Round((double)fullNow.Value / fullDesign.Value * 100.0, 1);
@@ -198,7 +230,7 @@ public sealed class LinuxBatteryService : IBatteryService
     /// "rate" and "now"/"full" must share the same unit basis (both Amp or both Watt).
     /// Returns null when the rate is zero (e.g. "Not charging") to avoid divide-by-zero.
     /// </summary>
-    private static TimeSpan? CalcTime(string status, long? now, long? full, long? rate)
+    internal static TimeSpan? CalcTime(string status, long? now, long? full, long? rate)
     {
         if (rate is not > 0 || now is null)
             return null;
@@ -229,16 +261,16 @@ public sealed class LinuxBatteryService : IBatteryService
     // --- Parsing helpers -----------------------------------------------------
 
     /// <summary>sysfs reports micro-units (µV, µA, µWh). Convert to base unit.</summary>
-    private static double? ScaleMicro(long? micro)
+    internal static double? ScaleMicro(long? micro)
         => micro.HasValue ? micro.Value / 1_000_000.0 : null;
 
-    private static int? ParseInt(string? s)
+    internal static int? ParseInt(string? s)
         => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : null;
 
-    private static long? ParseLong(string? s)
+    internal static long? ParseLong(string? s)
         => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : null;
 
-    private static string? NullIfBlank(string? s)
+    internal static string? NullIfBlank(string? s)
         => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
     /// <summary>Reads a file, returning null on any IO/permission error instead of throwing.</summary>
